@@ -1,0 +1,35 @@
+{
+    "$schema": "https://raw.githubusercontent.com/infection/infection/0.27.0/resources/schema.json",
+    "source": {
+        "directories": [
+            "src"
+        ],
+        "excludes": [
+            "Console/Commands",
+            "Queue/helpers.php"
+        ]
+    },
+    "logs": {
+        "text": "storage/infection/infection.log",
+        "html": "storage/infection/infection.html",
+        "summary": "storage/infection/summary.log"
+    },
+    "mutators": {
+        "@default": true,
+        // Disable some noisy mutators
+        "ConcatOperandRemoval": false,
+        "IncrementInteger": {
+            "ignore": [
+                "Fw\\Database\\*"  // Don't mutate offset/limit math
+            ]
+        }
+    },
+    "minMsi": 60,
+    "minCoveredMsi": 80,
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--testsuite=unit",
+    "timeout": 10,
+    "phpUnit": {
+        "configDir": "."
+    }
+}

@@ -1,0 +1,338 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fw\Http;
+
+use Fw\Core\Response;
+
+/**
+ * Standardized JSON API response builder.
+ *
+ * Provides consistent response formatting following RFC 9457 Problem Details
+ * for errors and a structured format for success responses.
+ */
+final class ApiResponse
+{
+    private Response $response;
+    private int $status = 200;
+    private array $headers = [];
+    private ?string $baseUri = null;
+
+    public function __construct(?Response $response = null)
+    {
+        $this->response = $response ?? new Response();
+    }
+
+    /**
+     * Create a new API response instance.
+     */
+    public static function make(?Response $response = null): self
+    {
+        return new self($response);
+    }
+
+    /**
+     * Set the base URI for error type URLs.
+     */
+    public function withBaseUri(string $uri): self
+    {
+        $this->baseUri = rtrim($uri, '/');
+        return $this;
+    }
+
+    /**
+     * Set a response header.
+     */
+    public function header(string $name, string $value): self
+    {
+        $this->headers[$name] = $value;
+        return $this;
+    }
+
+    /**
+     * Create a success response with data.
+     */
+    public function success(mixed $data = null, int $status = 200): array
+    {
+        $this->status = $status;
+
+        $response = [
+            'data' => $data,
+            'meta' => [
+                'timestamp' => (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339),
+            ],
+        ];
+
+        return $this->formatResponse($response);
+    }
+
+    /**
+     * Create a success response with a message.
+     */
+    public function message(string $message, int $status = 200): array
+    {
+        return $this->success(['message' => $message], $status);
+    }
+
+    /**
+     * Create a created response (201).
+     */
+    public function created(mixed $data = null, ?string $location = null): array
+    {
+        if ($location !== null) {
+            $this->header('Location', $location);
+        }
+
+        return $this->success($data, 201);
+    }
+
+    /**
+     * Create a no content response (204).
+     */
+    public function noContent(): array
+    {
+        $this->status = 204;
+        return $this->formatResponse(null);
+    }
+
+    /**
+     * Create a paginated response.
+     */
+    public function paginated(
+        array $items,
+        int $total,
+        int $page,
+        int $perPage,
+        ?string $path = null
+    ): array {
+        $totalPages = (int) ceil($total / $perPage);
+
+        $links = [];
+        if ($path !== null) {
+            $links = [
+                'self' => $path . '?page=' . $page,
+                'first' => $path . '?page=1',
+                'last' => $path . '?page=' . $totalPages,
+            ];
+
+            if ($page > 1) {
+                $links['prev'] = $path . '?page=' . ($page - 1);
+            }
+
+            if ($page < $totalPages) {
+                $links['next'] = $path . '?page=' . ($page + 1);
+            }
+        }
+
+        $response = [
+            'data' => $items,
+            'meta' => [
+                'timestamp' => (new \DateTimeImmutable())->format(\DateTimeInterface::RFC3339),
+                'pagination' => [
+                    'total' => $total,
+                    'per_page' => $perPage,
+                    'current_page' => $page,
+                    'total_pages' => $totalPages,
+                    'from' => ($page - 1) * $perPage + 1,
+                    'to' => min($page * $perPage, $total),
+                ],
+            ],
+        ];
+
+        if (!empty($links)) {
+            $response['links'] = $links;
+        }
+
+        return $this->formatResponse($response);
+    }
+
+    /**
+     * Create an error response following RFC 9457 Problem Details.
+     */
+    public function error(
+        string $title,
+        int $status = 400,
+        ?string $detail = null,
+        ?string $type = null,
+        ?string $instance = null,
+        array $extensions = []
+    ): array {
+        $this->status = $status;
+
+        // Generate type URL if not provided
+        if ($type === null) {
+            $slug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $title));
+            $type = ($this->baseUri ?? 'https://api.example.com') . '/errors/' . $slug;
+        }
+
+        $response = [
+            'type' => $type,
+            'title' => $title,
+            'status' => $status,
+        ];
+
+        if ($detail !== null) {
+            $response['detail'] = $detail;
+        }
+
+        if ($instance !== null) {
+            $response['instance'] = $instance;
+        }
+
+        // Add any extension members
+        foreach ($extensions as $key => $value) {
+            if (!in_array($key, ['type', 'title', 'status', 'detail', 'instance'], true)) {
+                $response[$key] = $value;
+            }
+        }
+
+        $this->header('Content-Type', 'application/problem+json');
+
+        return $this->formatResponse($response);
+    }
+
+    /**
+     * Create a 400 Bad Request error.
+     */
+    public function badRequest(string $detail, ?string $instance = null): array
+    {
+        return $this->error('Bad Request', 400, $detail, null, $instance);
+    }
+
+    /**
+     * Create a 401 Unauthorized error.
+     */
+    public function unauthorized(string $detail = 'Authentication required', ?string $instance = null): array
+    {
+        $this->header('WWW-Authenticate', 'Bearer');
+        return $this->error('Unauthorized', 401, $detail, null, $instance);
+    }
+
+    /**
+     * Create a 403 Forbidden error.
+     */
+    public function forbidden(string $detail = 'Access denied', ?string $instance = null): array
+    {
+        return $this->error('Forbidden', 403, $detail, null, $instance);
+    }
+
+    /**
+     * Create a 404 Not Found error.
+     */
+    public function notFound(string $detail = 'Resource not found', ?string $instance = null): array
+    {
+        return $this->error('Not Found', 404, $detail, null, $instance);
+    }
+
+    /**
+     * Create a 422 Unprocessable Entity error with validation errors.
+     */
+    public function validationError(array $errors, ?string $instance = null): array
+    {
+        return $this->error(
+            'Validation Failed',
+            422,
+            'The given data was invalid.',
+            null,
+            $instance,
+            ['errors' => $errors]
+        );
+    }
+
+    /**
+     * Create a 429 Too Many Requests error.
+     */
+    public function tooManyRequests(int $retryAfter = 60, ?string $instance = null): array
+    {
+        $this->header('Retry-After', (string) $retryAfter);
+        return $this->error(
+            'Too Many Requests',
+            429,
+            'Rate limit exceeded. Please try again later.',
+            null,
+            $instance,
+            ['retry_after' => $retryAfter]
+        );
+    }
+
+    /**
+     * Create a 500 Internal Server Error.
+     */
+    public function serverError(string $detail = 'An unexpected error occurred', ?string $instance = null): array
+    {
+        return $this->error('Internal Server Error', 500, $detail, null, $instance);
+    }
+
+    /**
+     * Get the HTTP status code.
+     */
+    public function getStatus(): int
+    {
+        return $this->status;
+    }
+
+    /**
+     * Get the response headers.
+     */
+    public function getHeaders(): array
+    {
+        return $this->headers;
+    }
+
+    /**
+     * Send the response and exit.
+     */
+    public function send(array $data): never
+    {
+        foreach ($this->headers as $name => $value) {
+            $this->response->header($name, $value);
+        }
+
+        $this->response->setStatus($this->status);
+        $this->response->json($data);
+    }
+
+    /**
+     * Format the response with headers set.
+     */
+    private function formatResponse(?array $data): array
+    {
+        return $data ?? [];
+    }
+
+    /**
+     * Create a HATEOAS link.
+     */
+    public static function link(string $href, string $rel = 'self', ?string $method = null): array
+    {
+        $link = [
+            'href' => $href,
+            'rel' => $rel,
+        ];
+
+        if ($method !== null) {
+            $link['method'] = strtoupper($method);
+        }
+
+        return $link;
+    }
+
+    /**
+     * Create a collection of HATEOAS links.
+     */
+    public static function links(array $links): array
+    {
+        $result = [];
+
+        foreach ($links as $rel => $href) {
+            if (is_array($href)) {
+                $result[] = array_merge(['rel' => $rel], $href);
+            } else {
+                $result[] = ['href' => $href, 'rel' => $rel];
+            }
+        }
+
+        return $result;
+    }
+}

@@ -1,0 +1,331 @@
+# FW Framework Documentation
+> High-performance, opinionated PHP 8.5+ MVC with Fibers, Result types, and zero-null architecture.
+
+## Quick Facts
+- PHP 8.5+ required (property hooks, asymmetric visibility)
+- Fiber-based async request handling
+- 6,000+ req/sec with FrankenPHP
+- Result/Option types - NO null, NO try/catch for control flow
+- Active Record ORM with query builder
+
+## Core Principles
+
+### 1. Never Use Null - Use Option
+```php
+// WRONG
+public function find(int $id): ?User { return $user ?? null; }
+
+// CORRECT
+public function find(int $id): Option { return Option::some($user)->orElse(Option::none()); }
+
+// Usage
+User::find($id)->match(
+    some: fn($user) => $user->name,
+    none: fn() => 'Guest'
+);
+```
+
+### 2. Never Use Try/Catch for Logic - Use Result
+```php
+// WRONG
+try {
+    $user = $this->createUser($data);
+} catch (Exception $e) {
+    return $this->error($e->getMessage());
+}
+
+// CORRECT
+$result = $this->createUser($data);
+return $result->match(
+    ok: fn($user) => $this->redirect('/users/' . $user->id),
+    err: fn($error) => $this->view('users.create', ['errors' => $error])
+);
+```
+
+### 3. Controllers Return Response Objects
+```php
+class PostController extends Controller
+{
+    public function index(Request $request): Response
+    {
+        $posts = Post::all();
+        return $this->view('posts.index', compact('posts'));
+    }
+
+    public function store(Request $request): Response
+    {
+        $validation = $this->validate($request, [
+            'title' => 'required|min:3',
+            'content' => 'required|min:10',
+        ]);
+
+        if ($validation->isErr()) {
+            return $this->view('posts.create', ['errors' => $validation->getError()]);
+        }
+
+        $post = Post::create($validation->getValue());
+        return $this->redirect('/posts/' . $post->id);
+    }
+}
+```
+
+### 4. Models Use Static Properties
+```php
+class Post extends Model
+{
+    protected static ?string $table = 'posts';
+    protected static array $fillable = ['title', 'content', 'user_id'];
+    protected static array $casts = ['published_at' => 'datetime'];
+
+    public function author(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+}
+```
+
+### 5. Views Are Plain PHP
+```php
+// app/Views/posts/index.php
+<?php $title = 'Posts'; ?>
+
+<h1>Posts</h1>
+<?php foreach ($posts as $post): ?>
+    <article>
+        <h2><?= $e($post->title) ?></h2>
+        <p><?= $strLimit($post->content, 200) ?></p>
+    </article>
+<?php endforeach; ?>
+```
+
+## File Structure
+```
+app/
+├── Controllers/     # Extend Fw\Core\Controller
+├── Models/          # Extend Fw\Model\Model
+├── Views/           # Plain PHP templates
+│   └── layouts/     # Layout templates (app.php)
+├── Providers/       # Extend Fw\Core\ServiceProvider
+config/
+├── app.php          # App settings
+├── database.php     # DB connection
+├── routes.php       # Route definitions
+├── middleware.php   # Middleware config
+├── providers.php    # Provider registration
+database/
+└── migrations/      # Numbered migration files
+src/                 # Framework core (Fw namespace)
+```
+
+## Routes (config/routes.php)
+```php
+return function (Router $router): void {
+    // Basic routes
+    $router->get('/', [HomeController::class, 'index']);
+    $router->get('/posts', [PostController::class, 'index']);
+    $router->post('/posts', [PostController::class, 'store']);
+
+    // Route with parameter
+    $router->get('/posts/{id}', [PostController::class, 'show']);
+
+    // Groups with middleware
+    $router->group('/admin', function (Router $router) {
+        $router->get('/dashboard', [AdminController::class, 'dashboard']);
+    }, ['auth']);
+
+    // Chained middleware
+    $router->post('/api/posts', [ApiController::class, 'store'])
+        ->middleware(['api.auth', 'throttle']);
+};
+```
+
+## Middleware
+```php
+class AuthMiddleware implements MiddlewareInterface
+{
+    public function __construct(private Application $app) {}
+
+    public function handle(Request $request, callable $next): Response|string|array
+    {
+        if (!Auth::check()) {
+            return new Response('', 302, ['Location' => '/login']);
+        }
+        return $next($request);
+    }
+}
+```
+
+## Migrations
+```php
+final class CreatePostsTable extends Migration
+{
+    public function up(): void
+    {
+        $this->create('posts', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id');
+            $table->string('title');
+            $table->text('content');
+            $table->datetime('published_at')->nullable();
+            $table->timestamps();
+
+            $table->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
+        });
+    }
+
+    public function down(): void
+    {
+        $this->drop('posts');
+    }
+}
+```
+
+## Service Providers
+```php
+class AppServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        // Bind interfaces to implementations
+        $this->container->singleton(PaymentGateway::class, fn() => new StripeGateway());
+    }
+
+    public function boot(): void
+    {
+        // Called after all providers registered
+        // Safe to resolve from container here
+    }
+}
+```
+
+## CQRS Commands & Queries
+```php
+// Command (write operation)
+final readonly class CreatePost implements Command
+{
+    public function __construct(
+        public string $title,
+        public string $content,
+        public int $userId,
+    ) {}
+}
+
+// Handler
+final class CreatePostHandler implements Handler
+{
+    public function handle(CreatePost $command): Result
+    {
+        $post = Post::create([
+            'title' => $command->title,
+            'content' => $command->content,
+            'user_id' => $command->userId,
+        ]);
+        return Result::ok($post);
+    }
+}
+
+// Usage in controller
+$result = $this->dispatch(new CreatePost($title, $content, $userId));
+```
+
+## Validation Rules
+Available: `required`, `email`, `min:n`, `max:n`, `numeric`, `alpha`, `alphanumeric`, `url`, `uuid`
+
+```php
+$validation = $this->validate($request, [
+    'email' => 'required|email',
+    'password' => 'required|min:8',
+    'name' => 'required|min:2|max:100',
+]);
+
+if ($validation->isErr()) {
+    // $validation->getError() returns ['field' => 'error message']
+}
+
+$data = $validation->getValue(); // Clean validated data
+```
+
+## Response Helpers (in Controllers)
+```php
+$this->view('template.name', ['data' => $value]);  // Render view
+$this->json(['key' => 'value']);                    // JSON response
+$this->redirect('/path');                           // Redirect
+$this->back();                                      // Redirect to referrer
+$this->notFound('Message');                         // 404 response
+```
+
+## Model Query Methods
+```php
+Post::all();                          // Get all (Collection)
+Post::find($id);                      // Find by ID (Option)
+Post::where('status', 'active');      // Where clause (QueryBuilder)
+Post::create(['title' => '...']);     // Create new
+$post->update(['title' => '...']);    // Update existing
+$post->delete();                      // Delete
+
+// Chaining
+Post::where('user_id', $id)
+    ->orderBy('created_at', 'desc')
+    ->limit(10)
+    ->get();
+```
+
+## Key Namespaces
+- `Fw\Core\` - Application, Container, Controller, Request, Response, Router
+- `Fw\Model\` - Model, QueryBuilder, Relations
+- `Fw\Support\` - Result, Option, Collection, Str, Arr
+- `Fw\Middleware\` - MiddlewareInterface, built-in middleware
+- `Fw\Bus\` - Command, Query, CommandBus, QueryBus
+- `App\Controllers\` - Your controllers
+- `App\Models\` - Your models
+- `App\Providers\` - Your service providers
+
+## PHP 8.5 Features
+
+### array_first() / array_last()
+```php
+// Get first/last from array (null if empty)
+$first = array_first($items);
+$last = array_last($items);
+
+// With predicate (find first matching)
+$admin = array_first($users, fn($u) => $u->role === 'admin');
+```
+
+### Pipe Operator (|>)
+```php
+use Fw\Support\Pipe;
+
+// Chain transformations
+$result = $data
+    |> Pipe::filter(fn($d) => $d['active'])
+    |> Pipe::map(fn($d) => strtoupper($d['name']))
+    |> Pipe::toOption();
+
+// Available helpers: map, filter, tap, orElse, toOption, toOk, collect,
+// get, pluck, filterArray, sort, take, first, last, compose, when, throwIf
+```
+
+### Filter Exceptions
+```php
+// Throw on validation failure instead of returning false
+try {
+    $data = Validator::make($input, $rules)->validateOrFail();
+} catch (ValidationException $e) {
+    // Handle validation errors
+}
+```
+
+## AI Agent Rules
+1. Always use `Result` for operations that can fail
+2. Always use `Option` for values that may not exist
+3. Never return `null` from methods - use `Option::none()`
+4. Never use `try/catch` for business logic flow control
+5. Controllers must return `Response` objects
+6. Models use `protected static` for configuration properties
+7. All files must have `declare(strict_types=1);`
+8. Use `$e()` or `htmlspecialchars()` for output escaping in views
+9. Use `$csrf()` helper in forms for CSRF protection
+10. Migrations are numbered sequentially (0001_, 0002_, etc.)
+11. Use `array_first()`/`array_last()` instead of manual array access (PHP 8.5)
+12. Use `Pipe` helpers for functional composition with pipe operator

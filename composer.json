@@ -1,0 +1,100 @@
+{
+    "name": "fw/framework",
+    "description": "A lightweight PHP 8.4+ MVC framework optimized for speed and security",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "framework",
+        "mvc",
+        "php8",
+        "async",
+        "fiber",
+        "performance",
+        "security"
+    ],
+    "homepage": "https://github.com/fw-php/framework",
+    "authors": [
+        {
+            "name": "Fw Framework Contributors",
+            "homepage": "https://github.com/fw-php/framework/contributors"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/fw-php/framework/issues",
+        "source": "https://github.com/fw-php/framework"
+    },
+    "require": {
+        "php": ">=8.4",
+        "ext-pdo": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*"
+    },
+    "suggest": {
+        "ext-apcu": "For high-performance in-memory caching",
+        "ext-redis": "For Redis cache and queue drivers",
+        "ext-opcache": "For OPcache-based configuration caching"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.93",
+        "infection/infection": "^0.29",
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Fw\\": "src/",
+            "App\\": "app/",
+            "Database\\Seeders\\": "database/seeders/"
+        },
+        "files": [
+            "src/Queue/helpers.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Fw\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test:unit": "phpunit --testsuite=unit",
+        "test:feature": "phpunit --testsuite=feature",
+        "test:architecture": "phpunit --testsuite=architecture",
+        "test:coverage": "phpunit --coverage-html storage/coverage",
+        "test:mutation": "infection --threads=4",
+        "lint": "php-cs-fixer fix --dry-run --diff",
+        "lint:fix": "php-cs-fixer fix",
+        "analyse": "phpstan analyse",
+        "security": "php fw validate:security",
+        "validate": "php fw validate:all",
+        "ci": [
+            "@lint",
+            "@analyse",
+            "@security",
+            "@test"
+        ]
+    },
+    "scripts-descriptions": {
+        "test": "Run all tests",
+        "test:unit": "Run unit tests only",
+        "test:feature": "Run feature tests only",
+        "test:architecture": "Run architecture tests only",
+        "test:coverage": "Run tests with coverage report",
+        "test:mutation": "Run mutation testing",
+        "lint": "Check code style",
+        "lint:fix": "Fix code style issues",
+        "analyse": "Run static analysis",
+        "security": "Run security scan",
+        "validate": "Run all validation checks",
+        "ci": "Run full CI pipeline locally"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true,
+        "allow-plugins": {
+            "infection/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

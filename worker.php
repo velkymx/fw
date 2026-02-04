@@ -1,0 +1,64 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+define('BASE_PATH', __DIR__);
+
+require BASE_PATH . '/vendor/autoload.php';
+
+use Fw\Queue\Queue;
+use Fw\Queue\Worker;
+
+// Parse command line arguments
+$options = getopt('q:s:j:t:m:h', ['queue:', 'sleep:', 'max-jobs:', 'max-time:', 'memory:', 'help', 'once']);
+
+if (isset($options['h']) || isset($options['help'])) {
+    echo <<<HELP
+    Queue Worker
+
+    Usage: php worker.php [options]
+
+    Options:
+      -q, --queue <name>      Queue to process (default: default)
+      -s, --sleep <seconds>   Seconds to sleep when no jobs (default: 3)
+      -j, --max-jobs <count>  Stop after processing N jobs (default: unlimited)
+      -t, --max-time <secs>   Stop after N seconds (default: unlimited)
+      -m, --memory <MB>       Stop if memory exceeds N MB (default: 128)
+          --once              Process a single job and exit
+      -h, --help              Show this help message
+
+    Examples:
+      php worker.php -q emails
+      php worker.php --queue=default --max-jobs=100
+      php worker.php -q images -m 256 -t 3600
+      php worker.php --once
+
+    HELP;
+    exit(0);
+}
+
+$queueName = $options['q'] ?? $options['queue'] ?? 'default';
+$sleep = (int) ($options['s'] ?? $options['sleep'] ?? 3);
+$maxJobs = (int) ($options['j'] ?? $options['max-jobs'] ?? 0);
+$maxTime = (int) ($options['t'] ?? $options['max-time'] ?? 0);
+$memory = (int) ($options['m'] ?? $options['memory'] ?? 128);
+$once = isset($options['once']);
+
+// Initialize the queue
+$queue = Queue::getInstance();
+
+// Create and configure worker
+$worker = (new Worker($queue))
+    ->sleep($sleep)
+    ->maxJobs($maxJobs)
+    ->maxTime($maxTime)
+    ->memory($memory);
+
+// Run
+if ($once) {
+    $processed = $worker->workOnce($queueName);
+    exit($processed ? 0 : 1);
+} else {
+    $worker->work($queueName);
+}

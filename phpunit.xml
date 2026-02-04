@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/bootstrap.php"
+         colors="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         stopOnFailure="false"
+         cacheDirectory=".phpunit.cache"
+         beStrictAboutOutputDuringTests="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
+         displayDetailsOnTestsThatTriggerErrors="true">
+
+    <testsuites>
+        <testsuite name="unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+        <testsuite name="integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+        <testsuite name="architecture">
+            <directory>tests/Architecture</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory suffix=".php">src</directory>
+            <directory suffix=".php">app</directory>
+        </include>
+        <exclude>
+            <directory>src/Console/Commands</directory>
+            <file>src/Queue/helpers.php</file>
+        </exclude>
+    </source>
+
+    <coverage>
+        <report>
+            <html outputDirectory="storage/coverage"/>
+            <clover outputFile="storage/coverage/clover.xml"/>
+            <text outputFile="php://stdout" showOnlySummary="true"/>
+        </report>
+    </coverage>
+
+    <php>
+        <env name="APP_ENV" value="testing"/>
+        <env name="DB_DRIVER" value="sqlite"/>
+        <env name="DB_DATABASE" value=":memory:"/>
+        <env name="CACHE_DRIVER" value="array"/>
+        <env name="QUEUE_DRIVER" value="sync"/>
+    </php>
+</phpunit>

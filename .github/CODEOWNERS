@@ -1,0 +1,29 @@
+# Code Owners
+# These owners will be requested for review when someone opens a PR
+
+# Default owner for everything
+* @velkymx
+
+# Security-sensitive files require security review
+src/Security/ @velkymx
+src/Auth/ @velkymx
+src/Middleware/CsrfMiddleware.php @velkymx
+src/Middleware/AuthMiddleware.php @velkymx
+config/middleware.php @velkymx
+
+# Database layer changes
+src/Database/ @velkymx
+database/migrations/ @velkymx
+
+# Core framework changes
+src/Core/ @velkymx
+
+# Configuration changes
+config/ @velkymx
+.env.example @velkymx
+
+# CI/CD changes
+.github/ @velkymx
+phpstan.neon @velkymx
+.php-cs-fixer.php @velkymx
+phpunit.xml @velkymx

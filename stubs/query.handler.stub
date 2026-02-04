@@ -1,0 +1,27 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Handlers;
+
+use App\Queries\{{QUERY_NAME}};
+
+/**
+ * Handler for {{QUERY_NAME}}.
+ */
+final class {{CLASS_NAME}}
+{
+    public function __construct(
+        // Inject dependencies here
+    ) {}
+
+    /**
+     * Handle the query and return the result.
+     *
+     * @return mixed The query result
+     */
+    public function handle({{QUERY_NAME}} $query): mixed
+    {
+        //
+    }
+}

@@ -1,0 +1,17 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers{{NAMESPACE}};
+
+use Fw\Core\Controller;
+use Fw\Core\Request;
+use Fw\Core\Response;
+
+class {{CLASS_NAME}} extends Controller
+{
+    public function index(Request $request): Response
+    {
+        return $this->view('{{VIEW_PATH}}.index');
+    }
+}

@@ -1,0 +1,43 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Database\Factories;
+
+use {{MODEL_CLASS}};
+use Fw\Testing\Factory;
+
+/**
+ * Factory for {{MODEL_NAME}} model.
+ *
+ * @extends Factory<{{MODEL_NAME}}>
+ */
+class {{CLASS_NAME}} extends Factory
+{
+    protected string $model = {{MODEL_NAME}}::class;
+
+    /**
+     * Define the default model attributes.
+     *
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        return [
+            // Define default attributes here
+            // 'name' => $this->faker->name(),
+            // 'email' => $this->faker->unique()->email(),
+        ];
+    }
+
+    /**
+     * Define a specific state.
+     *
+     * Example:
+     *     {{CLASS_NAME}}::new()->active()->create();
+     */
+    // public function active(): static
+    // {
+    //     return $this->state(['status' => 'active']);
+    // }
+}

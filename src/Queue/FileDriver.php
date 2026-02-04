@@ -1,0 +1,450 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Fw\Queue;
+
+final class FileDriver implements DriverInterface
+{
+    private string $path;
+
+    /**
+     * Secret key for HMAC signing of serialized job payloads.
+     * Prevents RCE via deserialization of tampered payloads.
+     */
+    private string $secretKey;
+
+    /**
+     * Lock file TTL in seconds. Lock files older than this are considered stale.
+     */
+    private const int LOCK_FILE_TTL = 300;
+
+    /**
+     * Maximum job payload size in bytes (1MB default).
+     * Prevents disk exhaustion attacks via oversized job payloads.
+     */
+    private const int MAX_PAYLOAD_SIZE = 1024 * 1024;
+
+    public function __construct(string $path, ?string $secretKey = null)
+    {
+        $this->path = rtrim($path, '/');
+
+        // Use provided key or generate one and store it
+        $this->secretKey = $secretKey ?? $this->getOrCreateSecretKey();
+
+        if (!is_dir($this->path)) {
+            mkdir($this->path, 0755, true);
+        }
+    }
+
+    /**
+     * Get or create a persistent secret key for job signing.
+     *
+     * Uses file locking to prevent race conditions when multiple workers
+     * start simultaneously and all try to create/read the key.
+     */
+    private function getOrCreateSecretKey(): string
+    {
+        // Ensure directory exists first
+        if (!is_dir($this->path)) {
+            mkdir($this->path, 0755, true);
+        }
+
+        $keyFile = $this->path . '/.queue_key';
+        $lockFile = $this->path . '/.queue_key.lock';
+
+        // Acquire exclusive lock before any file operations
+        $lockHandle = fopen($lockFile, 'c');
+        if ($lockHandle === false) {
+            throw new \RuntimeException('Failed to open lock file for queue key');
+        }
+
+        try {
+            // Block until we get exclusive lock
+            if (!flock($lockHandle, LOCK_EX)) {
+                throw new \RuntimeException('Failed to acquire lock for queue key');
+            }
+
+            // Re-check if file exists AFTER acquiring lock (another process may have created it)
+            if (file_exists($keyFile)) {
+                $key = file_get_contents($keyFile);
+                if ($key !== false && strlen($key) >= 32) {
+                    return $key;
+                }
+            }
+
+            // Generate a new key
+            $key = bin2hex(random_bytes(32));
+
+            // Set restrictive umask BEFORE writing to prevent race condition
+            // where file is briefly world-readable
+            $oldUmask = umask(0077);
+
+            try {
+                // Write to temp file first, then rename for atomicity
+                $tempFile = $keyFile . '.' . bin2hex(random_bytes(8)) . '.tmp';
+                file_put_contents($tempFile, $key, LOCK_EX);
+                chmod($tempFile, 0600);
+
+                // Atomic rename
+                if (!rename($tempFile, $keyFile)) {
+                    @unlink($tempFile);
+                    throw new \RuntimeException('Failed to atomically create queue key file');
+                }
+            } finally {
+                umask($oldUmask);
+            }
+
+            // Verify permissions were set correctly
+            $perms = fileperms($keyFile) & 0777;
+            if ($perms !== 0600) {
+                error_log(
+                    "Warning: Queue secret key file has unexpected permissions {$perms}. Expected 0600."
+                );
+            }
+
+            return $key;
+        } finally {
+            flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
+    /**
+     * Sign a serialized job payload with HMAC.
+     */
+    private function signPayload(string $serialized): string
+    {
+        $signature = hash_hmac('sha256', $serialized, $this->secretKey);
+        return $signature . '.' . base64_encode($serialized);
+    }
+
+    /**
+     * Verify and extract a signed job payload.
+     *
+     * @throws \RuntimeException If signature is invalid
+     */
+    private function verifyPayload(string $signed): string
+    {
+        $parts = explode('.', $signed, 2);
+
+        if (count($parts) !== 2) {
+            throw new \RuntimeException('Invalid job payload format');
+        }
+
+        [$signature, $encoded] = $parts;
+        $serialized = base64_decode($encoded, true);
+
+        if ($serialized === false) {
+            throw new \RuntimeException('Invalid job payload encoding');
+        }
+
+        $expectedSignature = hash_hmac('sha256', $serialized, $this->secretKey);
+
+        if (!hash_equals($expectedSignature, $signature)) {
+            throw new \RuntimeException('Job payload signature verification failed - possible tampering detected');
+        }
+
+        return $serialized;
+    }
+
+    public function push(JobInterface $job): string
+    {
+        return $this->later($job->getDelay(), $job);
+    }
+
+    public function later(int $delay, JobInterface $job): string
+    {
+        $jobId = $this->generateId();
+        $queue = $job->getQueue();
+        $availableAt = time() + $delay;
+
+        // Serialize and validate payload size
+        $serialized = serialize($job);
+        if (strlen($serialized) > self::MAX_PAYLOAD_SIZE) {
+            throw new \RuntimeException(
+                'Job payload too large: ' . strlen($serialized) . ' bytes exceeds maximum of ' . self::MAX_PAYLOAD_SIZE
+            );
+        }
+
+        // Sign the serialized job to prevent RCE via payload tampering
+        $signedJob = $this->signPayload($serialized);
+
+        $payload = [
+            'id' => $jobId,
+            'queue' => $queue,
+            'job' => $signedJob,
+            'attempts' => 0,
+            'available_at' => $availableAt,
+            'created_at' => time(),
+            'reserved_at' => null,
+        ];
+
+        $this->ensureQueueDirectory($queue);
+        $file = $this->getJobPath($queue, $jobId);
+
+        file_put_contents($file, json_encode($payload, JSON_THROW_ON_ERROR), LOCK_EX);
+
+        return $jobId;
+    }
+
+    public function pop(string $queue = 'default'): ?array
+    {
+        $this->ensureQueueDirectory($queue);
+        $dir = $this->getQueuePath($queue);
+        $now = time();
+
+        // Clean up stale lock files before processing
+        $this->cleanupStaleLocks($dir, $now);
+
+        $files = glob($dir . '/*.json');
+
+        if (empty($files)) {
+            return null;
+        }
+
+        // Sort by filename (which includes timestamp)
+        sort($files);
+
+        foreach ($files as $file) {
+            $lockFile = $file . '.lock';
+
+            // Try to acquire lock
+            $lock = fopen($lockFile, 'c');
+            if (!flock($lock, LOCK_EX | LOCK_NB)) {
+                fclose($lock);
+                continue;
+            }
+
+            if (!file_exists($file)) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+                @unlink($lockFile);
+                continue;
+            }
+
+            $content = file_get_contents($file);
+            $payload = json_decode($content, true);
+
+            if ($payload === null) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+                @unlink($file);
+                @unlink($lockFile);
+                continue;
+            }
+
+            // Check if job is available
+            if ($payload['available_at'] > $now) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+                continue;
+            }
+
+            // Check if already reserved and not timed out (5 min timeout)
+            if ($payload['reserved_at'] !== null && ($now - $payload['reserved_at']) < 300) {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+                continue;
+            }
+
+            // Reserve the job
+            $payload['reserved_at'] = $now;
+            $payload['attempts']++;
+
+            file_put_contents($file, json_encode($payload, JSON_THROW_ON_ERROR), LOCK_EX);
+
+            flock($lock, LOCK_UN);
+            fclose($lock);
+
+            // Verify signature before deserializing (prevents RCE via tampering)
+            try {
+                $serialized = $this->verifyPayload($payload['job']);
+            } catch (\RuntimeException $e) {
+                // Tampered or corrupted job - delete it
+                @unlink($file);
+                @unlink($lockFile);
+                throw $e;
+            }
+
+            // Only allow Job classes to be unserialized (defense in depth)
+            $job = unserialize($serialized, ['allowed_classes' => [JobInterface::class, Job::class]]);
+            if (!$job instanceof JobInterface) {
+                throw new \RuntimeException('Invalid job payload: not a JobInterface');
+            }
+            $job->setJobId($payload['id']);
+
+            for ($i = 0; $i < $payload['attempts']; $i++) {
+                $job->incrementAttempts();
+            }
+
+            return [
+                'id' => $payload['id'],
+                'job' => $job,
+                'attempts' => $payload['attempts'],
+                'file' => $file,
+                'lock_file' => $lockFile,
+            ];
+        }
+
+        return null;
+    }
+
+    public function delete(string $jobId): bool
+    {
+        foreach ($this->getAllQueues() as $queue) {
+            $file = $this->getJobPath($queue, $jobId);
+            $lockFile = $file . '.lock';
+
+            if (file_exists($file)) {
+                @unlink($file);
+                @unlink($lockFile);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function release(string $jobId, int $delay = 0): bool
+    {
+        foreach ($this->getAllQueues() as $queue) {
+            $file = $this->getJobPath($queue, $jobId);
+
+            if (!file_exists($file)) {
+                continue;
+            }
+
+            $content = file_get_contents($file);
+            $payload = json_decode($content, true);
+
+            if ($payload === null) {
+                continue;
+            }
+
+            $payload['reserved_at'] = null;
+            $payload['available_at'] = time() + $delay;
+
+            file_put_contents($file, json_encode($payload, JSON_THROW_ON_ERROR), LOCK_EX);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    public function size(string $queue = 'default'): int
+    {
+        $this->ensureQueueDirectory($queue);
+        $dir = $this->getQueuePath($queue);
+        $files = glob($dir . '/*.json');
+
+        return count($files);
+    }
+
+    public function clear(string $queue = 'default'): int
+    {
+        $this->ensureQueueDirectory($queue);
+        $dir = $this->getQueuePath($queue);
+        $files = glob($dir . '/*.json');
+        $count = 0;
+
+        foreach ($files as $file) {
+            if (@unlink($file)) {
+                @unlink($file . '.lock');
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    private function generateId(): string
+    {
+        return sprintf('%d_%s', time(), bin2hex(random_bytes(8)));
+    }
+
+    private function getQueuePath(string $queue): string
+    {
+        return $this->path . '/' . $this->sanitizeQueueName($queue);
+    }
+
+    private function getJobPath(string $queue, string $jobId): string
+    {
+        return $this->getQueuePath($queue) . '/' . $jobId . '.json';
+    }
+
+    private function ensureQueueDirectory(string $queue): void
+    {
+        $dir = $this->getQueuePath($queue);
+
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+    }
+
+    private function sanitizeQueueName(string $queue): string
+    {
+        $sanitized = preg_replace('/[^a-zA-Z0-9_-]/', '', $queue) ?: 'default';
+
+        // Limit queue name length to prevent filesystem issues
+        if (strlen($sanitized) > 64) {
+            $sanitized = substr($sanitized, 0, 64);
+        }
+
+        return $sanitized;
+    }
+
+    /**
+     * Clean up stale lock files that may have been left by crashed workers.
+     *
+     * Lock files older than LOCK_FILE_TTL seconds are considered orphaned
+     * and are removed to prevent queue deadlock.
+     */
+    private function cleanupStaleLocks(string $dir, int $now): void
+    {
+        $lockFiles = glob($dir . '/*.lock');
+
+        if (empty($lockFiles)) {
+            return;
+        }
+
+        foreach ($lockFiles as $lockFile) {
+            $mtime = @filemtime($lockFile);
+
+            if ($mtime === false) {
+                continue;
+            }
+
+            // If lock file is older than TTL, it's stale
+            if (($now - $mtime) > self::LOCK_FILE_TTL) {
+                // Try to acquire the lock before deleting (in case it's legitimately held)
+                $lock = @fopen($lockFile, 'c');
+                if ($lock !== false) {
+                    if (flock($lock, LOCK_EX | LOCK_NB)) {
+                        // We got the lock, so it was indeed orphaned
+                        flock($lock, LOCK_UN);
+                        fclose($lock);
+                        @unlink($lockFile);
+                    } else {
+                        // Lock is held by another process, touch it to update mtime
+                        fclose($lock);
+                        @touch($lockFile);
+                    }
+                }
+            }
+        }
+    }
+
+    private function getAllQueues(): array
+    {
+        $queues = [];
+        $dirs = glob($this->path . '/*', GLOB_ONLYDIR);
+
+        foreach ($dirs as $dir) {
+            $queues[] = basename($dir);
+        }
+
+        return $queues ?: ['default'];
+    }
+}

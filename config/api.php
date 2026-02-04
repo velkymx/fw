@@ -1,0 +1,97 @@
+<?php
+
+declare(strict_types=1);
+
+use Fw\Core\Env;
+
+return [
+    /*
+    |--------------------------------------------------------------------------
+    | API Token Expiration
+    |--------------------------------------------------------------------------
+    |
+    | Default token expiration in seconds. Set to null for non-expiring tokens.
+    | Recommended: 30 days for mobile apps, shorter for high-security APIs.
+    |
+    */
+    'token_expiration' => Env::int('API_TOKEN_EXPIRATION', 60 * 60 * 24 * 30),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Rate Limits
+    |--------------------------------------------------------------------------
+    |
+    | Rate limits per token tier. The key is the tier name, value is requests
+    | per minute. Tokens can be assigned tiers via abilities.
+    |
+    */
+    'rate_limits' => [
+        'default' => Env::int('API_RATE_LIMIT_DEFAULT', 60),
+        'standard' => Env::int('API_RATE_LIMIT_STANDARD', 120),
+        'premium' => Env::int('API_RATE_LIMIT_PREMIUM', 300),
+        'unlimited' => 0,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Allowed Token Abilities
+    |--------------------------------------------------------------------------
+    |
+    | List of valid token abilities (scopes). Tokens can only be created with
+    | abilities from this list. Use hierarchical format for fine-grained control.
+    |
+    */
+    'abilities' => [
+        '*',              // Full access (superuser)
+        'read',           // Read-only access to all resources
+        'write',          // Write access to all resources
+
+        // Posts
+        'posts:read',     // Read posts
+        'posts:write',    // Create/update posts
+        'posts:delete',   // Delete posts
+
+        // Users
+        'users:read',     // Read user data
+        'users:write',    // Update user data
+
+        // Rate limit tiers (assigned as abilities)
+        'tier:standard',
+        'tier:premium',
+        'tier:unlimited',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | SPA Domains Whitelist
+    |--------------------------------------------------------------------------
+    |
+    | Domains allowed to make SPA (cookie-based) authenticated requests.
+    | These domains bypass token auth and use session + CSRF protection.
+    | Include both with and without 'www' prefix if needed.
+    |
+    */
+    'spa_domains' => Env::array('API_SPA_DOMAINS', ['localhost', '127.0.0.1']),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Token Prefix
+    |--------------------------------------------------------------------------
+    |
+    | Prefix for generated tokens. Helps identify token type at a glance.
+    | The format will be: {prefix}{user_id}|{random_hex}
+    |
+    */
+    'token_prefix' => Env::string('API_TOKEN_PREFIX', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Hash Algorithm
+    |--------------------------------------------------------------------------
+    |
+    | Algorithm used to hash tokens before storage.
+    | SHA-256 is recommended for performance and security balance.
+    |
+    */
+    'hash_algo' => Env::string('API_HASH_ALGO', 'sha256'),
+];

@@ -1,0 +1,31 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - app
+    excludePaths:
+        - src/Console/Commands  # CLI commands have dynamic patterns
+
+    # Treat phpdoc types as authoritative
+    treatPhpDocTypesAsCertain: false
+
+    # Report unused parameters
+    reportUnmatchedIgnoredErrors: false
+
+    # PHP 8.5 features
+    phpVersion: 80500
+
+    # Ignore patterns for framework magic
+    ignoreErrors:
+        # Option/Result monad unwrapping
+        - '#Call to method unwrap\(\) on Fw\\Types\\Option<.+>#'
+
+        # Dynamic model properties (handled by __get/__set)
+        - '#Access to an undefined property App\\Models\\.+::\$[a-zA-Z]+#'
+
+        # PDO parameter binding accepts mixed
+        - '#Parameter \#2 .+ of method PDOStatement::execute\(\) expects array<int\|string, mixed>#'
+
+    # Parallel processing
+    parallel:
+        maximumNumberOfProcesses: 4

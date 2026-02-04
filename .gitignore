@@ -1,0 +1,53 @@
+# Dependencies
+/vendor/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Storage
+/storage/cache/*
+/storage/logs/*
+/storage/queue/*
+/storage/views/*
+/storage/*.sqlite
+/storage/*.sqlite-wal
+/storage/*.sqlite-shm
+!/storage/cache/.gitkeep
+!/storage/logs/.gitkeep
+!/storage/cache/ratelimit/.gitkeep
+!/storage/queue/.gitkeep
+!/storage/views/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Testing
+.phpunit.result.cache
+.phpunit.cache/
+/storage/coverage/
+coverage/
+infection.log
+
+# Build artifacts
+/build/
+*.phar
+
+# Composer
+composer.lock
+
+# Queue secrets (for FileDriver)
+.queue_key
+/node_modules
+public/frankenphp

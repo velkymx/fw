@@ -1,0 +1,23 @@
+<?php
+
+declare(strict_types=1);
+
+use Fw\Database\Migration\Migration;
+use Fw\Database\Migration\Blueprint;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        $this->create('{{TABLE_NAME}}', function (Blueprint $table): void {
+            $table->id();
+            // Add columns here
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        $this->drop('{{TABLE_NAME}}');
+    }
+};

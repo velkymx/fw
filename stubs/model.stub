@@ -1,0 +1,22 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use Fw\Model\Model;
+
+class {{CLASS_NAME}} extends Model
+{
+    protected static ?string $table = '{{TABLE_NAME}}';
+
+    /** @var array<string> */
+    protected static array $fillable = [
+        //
+    ];
+
+    /** @var array<string, string> */
+    protected static array $casts = [
+        //
+    ];
+}

@@ -1,0 +1,19 @@
+<?php
+
+declare(strict_types=1);
+
+use Fw\Database\Migration\Migration;
+use Fw\Database\Migration\Blueprint;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        // Migration logic here
+    }
+
+    public function down(): void
+    {
+        // Rollback logic here
+    }
+};

@@ -1,0 +1,22 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Database\Seeders;
+
+use Fw\Database\Connection;
+
+class {{CLASS_NAME}}
+{
+    public function __construct(
+        private Connection $db,
+    ) {}
+
+    /**
+     * Run the database seeds.
+     */
+    public function run(): void
+    {
+        //
+    }
+}
